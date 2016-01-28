@@ -20,10 +20,13 @@
 #include <SPI.h>
 #endif
 #include <WiFi.h>
+// For scans that happen every 10 seconds
+unsigned long last = 0UL;
 
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+
 
 #if (SSD1306_LCDHEIGHT != 64)
 #error("Height incorrect, please fix Adafruit_SSD1306.h!");
@@ -32,9 +35,12 @@
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
 
+#include <TinyGPS++.h>
+TinyGPSPlus gps;
+
 void setup() {
   //Initialize serial and wait for port to open:
-  Serial.begin(115200);
+  Serial.begin(9600);
 
   WiFi.init();
   Serial.println(WiFi.firmwareVersion());
@@ -46,8 +52,8 @@ void setup() {
   // Show image buffer on the display hardware.
   // Since the buffer is intialized with an Adafruit splashscreen
   // internally, this will display the splashscreen.
-  //display.display();
-  //delay(2000);
+  display.display();
+  delay(2000);
 
   // Clear the buffer.
   display.clearDisplay();
@@ -63,12 +69,88 @@ void setup() {
 }
 
 void loop() {
-  delay(10000);
-  display.clearDisplay();
-  // scan for existing networks:
-  Serial.println("Scanning available networks...");
-  listNetworks();
-  display.display();
+  //Eat GPS characters
+  while (Serial.available() > 0)
+  {
+    gps.encode(Serial.read());
+  }
+  //every 10s scan
+  if (millis() - last > 10000)
+  {
+    display.clearDisplay();
+    // scan for existing networks:
+    Serial.println("Scanning available networks...");
+    listNetworks();
+    printDetailGPS();
+    summaryGPS();
+    display.display();
+    last = millis();   
+  }
+}
+void summaryGPS()
+{
+  display.setCursor(64,0);
+  display.print("Num Sat:");
+  display.print(gps.satellites.value());
+  if (gps.satellites.isUpdated())
+  {
+    Serial.print(F("SATELLITES Fix Age="));
+    Serial.print(gps.satellites.age());
+    Serial.print(F("ms Value="));
+    Serial.println(gps.satellites.value());
+  }
+}
+void printDetailGPS()
+{
+  if (gps.location.isUpdated())
+  {
+    Serial.print(F("LOCATION   Fix Age="));
+    Serial.print(gps.location.age());
+    Serial.print(F("ms Raw Lat="));
+    Serial.print(gps.location.rawLat().negative ? "-" : "+");
+    Serial.print(gps.location.rawLat().deg);
+    Serial.print("[+");
+    Serial.print(gps.location.rawLat().billionths);
+    Serial.print(F(" billionths],  Raw Long="));
+    Serial.print(gps.location.rawLng().negative ? "-" : "+");
+    Serial.print(gps.location.rawLng().deg);
+    Serial.print("[+");
+    Serial.print(gps.location.rawLng().billionths);
+    Serial.print(F(" billionths],  Lat="));
+    Serial.print(gps.location.lat(), 6);
+    Serial.print(F(" Long="));
+    Serial.println(gps.location.lng(), 6);
+  }
+
+  else if (gps.date.isUpdated())
+  {
+    Serial.print(F("DATE       Fix Age="));
+    Serial.print(gps.date.age());
+    Serial.print(F("ms Raw="));
+    Serial.print(gps.date.value());
+    Serial.print(F(" Year="));
+    Serial.print(gps.date.year());
+    Serial.print(F(" Month="));
+    Serial.print(gps.date.month());
+    Serial.print(F(" Day="));
+    Serial.println(gps.date.day());
+  }
+
+  else if (gps.time.isUpdated())
+  {
+    Serial.print(F("TIME       Fix Age="));
+    Serial.print(gps.time.age());
+    Serial.print(F("ms Raw="));
+    Serial.print(gps.time.value());
+    Serial.print(F(" Hour="));
+    Serial.print(gps.time.hour());
+    Serial.print(F(" Minute="));
+    Serial.print(gps.time.minute());
+    Serial.print(F(" Second="));
+    Serial.print(gps.time.second());
+    Serial.print(F(" Hundredths="));
+    Serial.println(gps.time.centisecond());
+  }
 }
 
 void printMacAddress() {
@@ -105,7 +187,7 @@ void listNetworks() {
   Serial.print("number of available networks:");
   Serial.println(numSsid);
   display.setCursor(0,0);
-  display.print("Num Nets:");
+  display.print("Num Net:");
   display.print(numSsid);
   
   // print the network number and name for each network found:
@@ -118,9 +200,10 @@ void listNetworks() {
     Serial.print(" dBm");
     Serial.print("\tEncryption: ");
     printEncryptionType(WiFi.encryptionType(thisNet));
-    display.setCursor(0,10+10*thisNet);
-    display.print(WiFi.SSID(thisNet));
-    display.print(" Sig:");
+    //Do some warping since we have only 
+    display.setCursor(64*(thisNet/5),10+10*(thisNet%5));
+    display.print(String(WiFi.SSID(thisNet)).substring(0,6));
+    display.print(":");
     display.print(WiFi.RSSI(thisNet));
   }
 }
