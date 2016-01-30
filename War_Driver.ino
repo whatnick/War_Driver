@@ -6,19 +6,24 @@
  
  Circuit:
  * CC3200 WiFi LaunchPad or CC3100 WiFi BoosterPack
-   with TM4C or MSP430 LaunchPad
+ with TM4C or MSP430 LaunchPad
  
  created 13 July 2010
  by dlf (Metodo2 srl)
  modified 21 Junn 2012
  by Tom Igoe and Jaymes Dec
  */
+#include "SPI.h" 
+#include "pfatfs.h"
 
+#define cs_pin  12
 
-#ifndef __CC3200R1M1RGC__
-// Do not include SPI for CC3200 LaunchPad
-#include <SPI.h>
-#endif
+unsigned short int bw=0;
+char buffer[512];
+int rc;
+uint16_t block_size=64;
+uint32_t AccStringLength = 0;
+
 #include <WiFi.h>
 // For scans that happen every 10 seconds
 unsigned long last = 0UL;
@@ -38,17 +43,26 @@ Adafruit_SSD1306 display(OLED_RESET);
 #include <TinyGPS++.h>
 TinyGPSPlus gps;
 
+void die (int pff_err) 		/* Stop with dying message */
+/* FatFs return value */
+{
+  Serial.println();
+  Serial.print("Failed with rc=");
+  Serial.print(pff_err,DEC);
+  for (;;) ;
+}
+
 void setup() {
   //Initialize serial and wait for port to open:
   Serial.begin(9600);
 
   WiFi.init();
   Serial.println(WiFi.firmwareVersion());
-  
+
   // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
   // init done
-  
+
   // Show image buffer on the display hardware.
   // Since the buffer is intialized with an Adafruit splashscreen
   // internally, this will display the splashscreen.
@@ -66,6 +80,9 @@ void setup() {
   // scan for existing networks:
   Serial.println("Scanning available networks...");
   listNetworks();
+
+  // initialize FatFS library (cspin, divider, module)
+  FatFs.begin(cs_pin,2);       
 }
 
 void loop() {
@@ -83,10 +100,27 @@ void loop() {
     listNetworks();
     printDetailGPS();
     summaryGPS();
+    LogScan();
     display.display();
     last = millis();   
   }
 }
+
+void LogScan()
+{
+  rc = FatFs.open("LOG.txt");//, FA_READ | FA_WRITE);
+  if (rc) die(rc);
+  rc = FatFs.lseek(  AccStringLength );
+  if (rc) die(rc);
+  AccStringLength =  AccStringLength + 512;
+  rc = FatFs.write(buffer, block_size, &bw);
+  if (rc) die(rc);
+  rc = FatFs.write(0, 0, &bw);  //Finalize write
+  if (rc) die(rc);
+  rc = FatFs.close();  //Close file
+  if (rc) die(rc);
+}
+
 void summaryGPS()
 {
   display.setCursor(64,0);
@@ -189,8 +223,9 @@ void listNetworks() {
   display.setCursor(0,0);
   display.print("Num Net:");
   display.print(numSsid);
-  
+
   // print the network number and name for each network found:
+  int cur_off = 0;
   for (int thisNet = 0; thisNet < numSsid; thisNet++) {
     Serial.print(thisNet);
     Serial.print(") ");
@@ -200,11 +235,16 @@ void listNetworks() {
     Serial.print(" dBm");
     Serial.print("\tEncryption: ");
     printEncryptionType(WiFi.encryptionType(thisNet));
-    //Do some warping since we have only 
+
+    //Do some warping since we have only 128x64 space
     display.setCursor(64*(thisNet/5),10+10*(thisNet%5));
     display.print(String(WiFi.SSID(thisNet)).substring(0,6));
     display.print(":");
     display.print(WiFi.RSSI(thisNet));
+
+    //Write data to buffer for logging to SD card
+    int n = sprintf(buffer+cur_off,"%s,%d,%d\n",WiFi.SSID(thisNet),WiFi.RSSI(thisNet),WiFi.encryptionType(thisNet));
+    cur_off += n;
   }
 }
 
@@ -228,6 +268,8 @@ void printEncryptionType(int thisType) {
     break;
   }
 }
+
+
 
 
 
